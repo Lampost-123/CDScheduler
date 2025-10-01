@@ -4,11 +4,10 @@
 
 1. Copy the `CDScheduler` folder into `World of Warcraft/_retail_/Interface/AddOns/`.
 2. Restart the game or `/reload`.
-3. Optional: ensure `LibJSON-1.0` is available (Auratimers bundles it). Without it, named lists can’t be serialized as a single SavedVariable string.
 
 ## Getting Started
 
-- Open the editor with `/cdscheduler` or `/cds`.
+- Open the editor with `/cds`.
 - Give your list a name, select it from the dropdown, and paste your entries into the left box using this format (one per line):
 
 ```
