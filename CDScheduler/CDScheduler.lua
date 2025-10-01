@@ -14,6 +14,7 @@ local WINDOW = 'window'
 local LISTS = 'lists'
 local SELECTED = 'selected'
 local SHOW_TRACKER = 'show_tracker'
+local ENCOUNTER_MAP = 'encounter_map'
 
 local function GetOpt(key, default)
     local v = CDSchedulerDB[key]
@@ -28,8 +29,14 @@ local function IsRaidArea()
     return itype == 'raid'
 end
 
+local encounterAllowed = true
 local function IsActive()
-    return GetOpt(ENABLE, false) and (IsRaidArea() or GetOpt(ALLOW_NONRAID, false))
+    if not GetOpt(ENABLE, false) then return false end
+    if not (IsRaidArea() or GetOpt(ALLOW_NONRAID, false)) then return false end
+    if not encounterAllowed then
+        return GetOpt(SELECTED, 'Default') == 'Custom'
+    end
+    return true
 end
 
 local function GetWindow()
@@ -96,6 +103,117 @@ local function SaveLists(tbl)
     end
 end
 
+local function DecorateDifficultyLabel(nm)
+    if type(nm) ~= 'string' then return nm end
+    if nm:find('%- Heroic$') then return (nm:gsub('%- Heroic$', '') .. ' - |cffff8000Heroic|r') end
+    if nm:find('%- Mythic$') then return (nm:gsub('%- Mythic$', '') .. ' - |cffa335eeMythic|r') end
+    return nm
+end
+
+local function GetEncounterMap()
+    local m = CDSchedulerDB[ENCOUNTER_MAP]
+    if type(m) ~= 'table' then m = {}; CDSchedulerDB[ENCOUNTER_MAP] = m end
+    return m
+end
+local function MapKey(encounterID, difficultyID)
+    return tostring(encounterID) .. ':' .. tostring(difficultyID)
+end
+local function AssignEncounterList(encounterID, difficultyID, listName)
+    local m = GetEncounterMap()
+    local key = MapKey(encounterID, difficultyID)
+    if listName and listName ~= '' then m[key] = listName end
+end
+local function LookupEncounterList(encounterID, difficultyID)
+    local m = GetEncounterMap()
+    return m[MapKey(encounterID, difficultyID)]
+end
+
+local function IsProtectedListName(name)
+    if not name or name == '' then return false end
+    local m = GetEncounterMap()
+    for _, v in pairs(m) do if v == name then return true end end
+    return false
+end
+
+local function SeedManaforgeOmega()
+    local seeds = {
+        [3129] = 'Plexus Sentinel',
+        [3131] = 'Loomithar',
+        [3130] = 'Soulbinder Naazindhri',
+        [3132] = 'Forgeweaver Araz',
+        [3122] = 'The Soul Hunters',
+        [3133] = 'Fractillus',
+        [3134] = 'Nexus-King Salhadaar',
+        [3135] = 'Dimensius the All-Devouring',
+    }
+    local lists = LoadLists()
+    local m = GetEncounterMap()
+    for eid, listName in pairs(seeds) do
+        local heroicName = listName .. ' - Heroic'
+        local mythicName = listName .. ' - Mythic'
+        if not lists[heroicName] then lists[heroicName] = '' end
+        if not lists[mythicName] then lists[mythicName] = '' end
+        m[MapKey(eid, 15)] = heroicName
+        m[MapKey(eid, 16)] = mythicName
+    end
+    if not lists['Custom'] then lists['Custom'] = '' end
+    SaveLists(lists)
+end
+
+local function EnsureDifficultySplit()
+    local seeds = {
+        [3129] = 'Plexus Sentinel',
+        [3131] = 'Loomithar',
+        [3130] = 'Soulbinder Naazindhri',
+        [3132] = 'Forgeweaver Araz',
+        [3122] = 'The Soul Hunters',
+        [3133] = 'Fractillus',
+        [3134] = 'Nexus-King Salhadaar',
+        [3135] = 'Dimensius the All-Devouring',
+    }
+    local lists = LoadLists()
+    local m = GetEncounterMap()
+    local changed = false
+    for eid, base in pairs(seeds) do
+        local heroicName = base .. ' - Heroic'
+        local mythicName = base .. ' - Mythic'
+        local legacy = lists[base]
+        if lists[heroicName] == nil then lists[heroicName] = legacy or ''; changed = true end
+        if lists[mythicName] == nil then lists[mythicName] = legacy or ''; changed = true end
+        m[MapKey(eid, 15)] = heroicName
+        m[MapKey(eid, 16)] = mythicName
+    end
+    if lists['Custom'] == nil then lists['Custom'] = ''; changed = true end
+    if changed then SaveLists(lists) end
+end
+
+local function CleanupNonDifficultyLists()
+    local lists = LoadLists()
+    local changed = false
+    for name,_ in pairs(lists) do
+        local isCustom = (name == 'Custom')
+        local isHeroic = type(name) == 'string' and name:find('%- Heroic$') ~= nil
+        local isMythic = type(name) == 'string' and name:find('%- Mythic$') ~= nil
+        if not isCustom and not isHeroic and not isMythic then
+            lists[name] = nil
+            changed = true
+        end
+    end
+    if changed then SaveLists(lists) end
+end
+
+local function PurgeUnlabeledLists()
+    local lists = LoadLists()
+    local changed = false
+    for name,_ in pairs(lists) do
+        if name ~= 'Custom' and not name:find('%- Heroic$') and not name:find('%- Mythic$') then
+            lists[name] = nil
+            changed = true
+        end
+    end
+    if changed then SaveLists(lists) end
+end
+
 local function ParseSelected()
     if not IsActive() then schedMap = {}; consumed = {}; return end
     local lists = LoadLists()
@@ -110,6 +228,8 @@ local function IsAllowedNow(spellId)
     if not list or #list == 0 then return true end
     local elapsed = (combatStart > 0) and (GetTime() - combatStart) or 0
     local w = GetWindow()
+    local lastTime = list[#list]
+    if lastTime and elapsed > (lastTime + w) then return true end
     for i = 1, #list do local t = list[i]; if elapsed >= t and elapsed <= t + w then return true end end
     return false
 end
@@ -187,8 +307,15 @@ local function BuildTracker()
     tracker:EnableMouse(true); tracker:SetMovable(true); tracker:RegisterForDrag('LeftButton'); tracker:SetScript('OnDragStart', tracker.StartMoving); tracker:SetScript('OnDragStop', tracker.StopMovingOrSizing)
     tracker:SetClampedToScreen(true)
     local bg = tracker:CreateTexture(nil, 'BACKGROUND'); bg:SetAllPoints(true); bg:SetColorTexture(0,0,0,0.12)
-    for i = 1, 6 do local row = CreateFrame('Frame', nil, tracker); row:SetSize(160, 22); if i == 1 then row:SetPoint('TOPLEFT', tracker, 'TOPLEFT', 8, -8) else row:SetPoint('TOPLEFT', rows[i-1], 'BOTTOMLEFT', 0, -4) end; row.icon = row:CreateTexture(nil, 'ARTWORK'); row.icon:SetSize(20,20); row.icon:SetPoint('LEFT', row, 'LEFT', 0, 0); row.text = row:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight'); row.text:SetPoint('LEFT', row.icon, 'RIGHT', 8, 0); row.text:SetPoint('RIGHT', row, 'RIGHT', -2, 0); row.text:SetJustifyH('LEFT'); row:Hide(); rows[i] = row end
-    tracker:SetScript('OnUpdate', function() local now = GetTime(); if now - last > 0.25 then if not GetOpt(SHOW_TRACKER, true) then tracker:Hide(); last = now; return end; local entries = FlattenEntries(); local shown = 0; local elapsed = (combatStart > 0) and (now - combatStart) or 0; local w = GetWindow(); for i = 1, #rows do local row = rows[i]; local e = entries[i]; if e then row.icon:SetTexture(e.tex or 136243); local rem = e.time - elapsed; if rem < 0 then rem = 0 end; row.text:SetText(TimeToMMSS(rem)); if (e.time - elapsed) <= w then row.text:SetTextColor(0.2,1,0.2) else row.text:SetTextColor(1,1,1) end; row:Show(); shown = shown + 1 else row:Hide() end end; if shown > 0 then tracker:Show() else tracker:Hide() end; last = now end end)
+    tracker.header = tracker:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    tracker.header:SetPoint('TOPLEFT', tracker, 'TOPLEFT', 8, -8)
+    tracker.header:SetPoint('RIGHT', tracker, 'RIGHT', -8, 0)
+    tracker.header:SetJustifyH('LEFT')
+    local topY = -22
+    for i = 1, 6 do local row = CreateFrame('Frame', nil, tracker); row:SetSize(160, 22); if i == 1 then row:SetPoint('TOPLEFT', tracker, 'TOPLEFT', 8, topY) else row:SetPoint('TOPLEFT', rows[i-1], 'BOTTOMLEFT', 0, -4) end; row.icon = row:CreateTexture(nil, 'ARTWORK'); row.icon:SetSize(20,20); row.icon:SetPoint('LEFT', row, 'LEFT', 0, 0); row.text = row:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight'); row.text:SetPoint('LEFT', row.icon, 'RIGHT', 8, 0); row.text:SetPoint('RIGHT', row, 'RIGHT', -2, 0); row.text:SetJustifyH('LEFT'); row:Hide(); rows[i] = row end
+    tracker:SetScript('OnUpdate', function() local now = GetTime(); if now - last > 0.25 then if not GetOpt(SHOW_TRACKER, true) then tracker:Hide(); last = now; return end; local entries = FlattenEntries(); local shown = 0; local elapsed = (combatStart > 0) and (now - combatStart) or 0; local w = GetWindow();
+        tracker.header:SetText('List: ' .. DecorateDifficultyLabel(GetOpt(SELECTED, 'Default') or 'Default'))
+        for i = 1, #rows do local row = rows[i]; local e = entries[i]; if e then row.icon:SetTexture(e.tex or 136243); local rem = e.time - elapsed; if rem < 0 then rem = 0 end; row.text:SetText(TimeToMMSS(rem)); if (e.time - elapsed) <= w then row.text:SetTextColor(0.2,1,0.2) else row.text:SetTextColor(1,1,1) end; row:Show(); shown = shown + 1 else row:Hide() end end; if shown > 0 then tracker:Show() else tracker:Hide() end; last = now end end)
 end
 
 local editor
@@ -205,6 +332,12 @@ SlashCmdList['CDS'] = function()
         listDropdown:SetPoint('TOPRIGHT', editor, 'TOPRIGHT', -40, -36)
         UIDropDownMenu_SetWidth(listDropdown, 160)
         UIDropDownMenu_SetText(listDropdown, 'Select list')
+        local function DecorateListLabel(nm)
+            if type(nm) ~= 'string' then return nm end
+            if nm:find('%- Heroic$') then return (nm:gsub('%- Heroic$', '') .. '|cffff8000 - Heroic|r') end
+            if nm:find('%- Mythic$') then return (nm:gsub('%- Mythic$', '') .. '|cffa335ee - Mythic|r') end
+            return nm
+        end
         local function RebuildListDropdown()
             local lists = LoadLists()
             local function OnSelect(self, arg1)
@@ -213,14 +346,35 @@ SlashCmdList['CDS'] = function()
                 CDSched_Edit:SetText(l[arg1] or '')
                 CDSchedulerDB[SELECTED] = arg1
                 ParseSelected()
+                UIDropDownMenu_SetText(listDropdown, DecorateListLabel(arg1))
             end
             UIDropDownMenu_Initialize(listDropdown, function(self, level)
                 local info = UIDropDownMenu_CreateInfo()
-                for nm,_ in pairs(lists) do
-                    info.text = nm; info.arg1 = nm; info.func = OnSelect; info.checked = (nm == (GetOpt(SELECTED, 'Default')))
+                local ordered = {}
+                local bases = {
+                    'Plexus Sentinel',
+                    'Loomithar',
+                    'Soulbinder Naazindhri',
+                    'Forgeweaver Araz',
+                    'The Soul Hunters',
+                    'Fractillus',
+                    'Nexus-King Salhadaar',
+                    'Dimensius the All-Devouring',
+                }
+                for i = 1, #bases do
+                    local base = bases[i]
+                    local h = base .. ' - Heroic'
+                    local m = base .. ' - Mythic'
+                    if lists[h] then table.insert(ordered, h) end
+                    if lists[m] then table.insert(ordered, m) end
+                end
+                if lists['Custom'] then table.insert(ordered, 'Custom') end
+                for i = 1, #ordered do
+                    local nm = ordered[i]
+                    info.text = DecorateListLabel(nm); info.arg1 = nm; info.func = OnSelect; info.checked = (nm == (GetOpt(SELECTED, 'Default')))
                     UIDropDownMenu_AddButton(info, level)
                 end
-                if next(lists) == nil then
+                if #ordered == 0 then
                     info = UIDropDownMenu_CreateInfo(); info.text = 'No lists saved'; info.notCheckable = true; info.disabled = true
                     UIDropDownMenu_AddButton(info, level)
                 end
@@ -242,11 +396,12 @@ SlashCmdList['CDS'] = function()
         edit:HookScript('OnTextChanged', UpdatePreview)
         local save = CreateFrame('Button', nil, editor, 'UIPanelButtonTemplate'); save:SetSize(100, 22); save:SetPoint('BOTTOMRIGHT', -10, 12); save:SetText('Save'); save:SetScript('OnClick', function()
             local txt = edit:GetText() or ''; local nm = CDSched_Name:GetText() or 'Default'
-            local lists = LoadLists(); lists[nm] = txt; SaveLists(lists); CDSchedulerDB[SELECTED] = nm; ParseSelected(); UpdatePreview(); UIDropDownMenu_SetText(listDropdown, nm); RebuildListDropdown()
+            local lists = LoadLists(); lists[nm] = txt; SaveLists(lists); CDSchedulerDB[SELECTED] = nm; ParseSelected(); UpdatePreview(); UIDropDownMenu_SetText(listDropdown, DecorateListLabel(nm)); RebuildListDropdown()
         end)
         local del = CreateFrame('Button', nil, editor, 'UIPanelButtonTemplate'); del:SetSize(100, 22); del:SetPoint('RIGHT', save, 'LEFT', -10, 0); del:SetText('Delete'); del:SetScript('OnClick', function()
             local nm = CDSched_Name:GetText() or ''
             if nm == '' then return end
+            if IsProtectedListName(nm) then print('[CDScheduler] Boss lists cannot be deleted.'); return end
             local lists = LoadLists(); lists[nm] = nil; SaveLists(lists); if GetOpt(SELECTED, 'Default') == nm then CDSchedulerDB[SELECTED] = 'Default' end; edit:SetText(''); CDSched_Name:SetText(''); ParseSelected(); UIDropDownMenu_SetText(listDropdown, 'Select list'); RebuildListDropdown()
         end)
         local enable = CreateFrame('CheckButton', nil, editor, 'SettingsCheckBoxTemplate'); enable:SetPoint('BOTTOMLEFT', editor, 'BOTTOMLEFT', 16, 16); enable:SetChecked(GetOpt(ENABLE, false)); enable:SetScript('OnClick', function(self) SetOpt(ENABLE, self:GetChecked()); if self:GetChecked() then if not tracker then BuildTracker() end end; ParseSelected(); BuildBadge(); TryReanchorBadge(); UpdateBadgeVisibility() end); enable:SetFrameStrata('HIGH')
@@ -262,7 +417,7 @@ SlashCmdList['CDS'] = function()
         editor.enable = enable; editor.allow = allow; editor.window = wl; editor.listDropdown = listDropdown
         RebuildListDropdown()
     end
-    local lists = LoadLists(); local cur = GetOpt(SELECTED, 'Default'); CDSched_Name:SetText(cur); CDSched_Edit:SetText(lists[cur] or ''); UIDropDownMenu_SetText(CDSched_ListDropdown, cur)
+    local lists = LoadLists(); local cur = GetOpt(SELECTED, 'Default'); CDSched_Name:SetText(cur); CDSched_Edit:SetText(lists[cur] or ''); UIDropDownMenu_SetText(CDSched_ListDropdown, (function(n) if n:find('%- Heroic$') then return (n:gsub('%- Heroic$', '') .. '|cffff8000 - Heroic|r') elseif n:find('%- Mythic$') then return (n:gsub('%- Mythic$', '') .. '|cffa335ee - Mythic|r') else return n end end)(cur))
     editor:Show()
 end
 
@@ -280,8 +435,8 @@ if MainAddon and MainAddon.Cast then
 end
 
 if HL and HL.RegisterForEvent then
-    HL:RegisterForEvent(function() combatStart = GetTime(); consumed = {}; if not tracker then BuildTracker() end end, 'PLAYER_REGEN_DISABLED')
-    HL:RegisterForEvent(function() combatStart = 0 end, 'PLAYER_REGEN_ENABLED')
+    HL:RegisterForEvent(function() combatStart = GetTime(); consumed = {}; encounterAllowed = true; if not tracker then BuildTracker() end end, 'PLAYER_REGEN_DISABLED')
+    HL:RegisterForEvent(function() combatStart = 0; consumed = {}; if tracker then tracker:Hide() end end, 'PLAYER_REGEN_ENABLED')
     HL:RegisterForEvent(function()
         local lists = LoadLists()
         if CDSchedulerDB[SELECTED] == nil then
@@ -289,12 +444,37 @@ if HL and HL.RegisterForEvent then
             for k,_ in pairs(lists) do first = k break end
             CDSchedulerDB[SELECTED] = first or 'Default'
         end
+        if not CDSchedulerDB._moSeeded then
+            SeedManaforgeOmega(); CDSchedulerDB._moSeeded = true
+        end
+        EnsureDifficultySplit()
+        CleanupNonDifficultyLists()
+        lists = LoadLists()
+        local cur = GetOpt(SELECTED, 'Default')
+        if cur and lists[cur] == nil then
+            CDSchedulerDB[SELECTED] = 'Custom'
+        end
         ParseSelected()
         BuildBadge(); StartAnchorTicker(); UpdateBadgeVisibility()
     end, 'PLAYER_LOGIN')
     HL:RegisterForEvent(function()
         BuildBadge(); StartAnchorTicker()
     end, 'ADDON_LOADED')
+
+    HL:RegisterForEvent(function(_, encounterID, encounterName, difficultyID)
+        local listName = LookupEncounterList(encounterID, difficultyID)
+        if listName then
+            local lists = LoadLists()
+            if lists[listName] then
+                CDSchedulerDB[SELECTED] = listName
+                ParseSelected()
+                if not tracker then BuildTracker() end
+            end
+            encounterAllowed = true
+        else
+            encounterAllowed = false
+        end
+    end, 'ENCOUNTER_START')
 end
 
 ParseSelected()
