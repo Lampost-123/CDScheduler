@@ -1,6 +1,6 @@
 # CDScheduler
 
-**## Installation
+## Installation
 
 1. Copy the `CDScheduler` folder into `World of Warcraft/_retail_/Interface/AddOns/`.
 2. Restart the game or `/reload`.
