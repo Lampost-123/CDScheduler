@@ -28,4 +28,4 @@ Example:
   - Enable scheduled cooldowns
   - Allow outside raid (testing)
   - Show on-screen tracker
-- Click “Save`. The last selected list is automatically loaded on login/reload.**
+- Click Save. The last selected list is automatically loaded on login/reload.
