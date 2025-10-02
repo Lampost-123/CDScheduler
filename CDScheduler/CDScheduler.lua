@@ -30,12 +30,20 @@ local function IsRaidArea()
 end
 
 local encounterAllowed = true
+local function IsCustomSelected()
+    local sel = GetOpt(SELECTED, 'Default')
+    if type(sel) ~= 'string' then return false end
+    sel = sel:gsub('%s+$',''):lower()
+    return sel == 'custom'
+end
 local function IsActive()
     if not GetOpt(ENABLE, false) then return false end
+    -- Always allow Custom anywhere (for dummy/testing use)
+    if IsCustomSelected() then return true end
+    -- Otherwise, require raid or explicit allow-outside-raid
     if not (IsRaidArea() or GetOpt(ALLOW_NONRAID, false)) then return false end
-    if not encounterAllowed then
-        return GetOpt(SELECTED, 'Default') == 'Custom'
-    end
+    -- And require a valid encounter mapping
+    if not encounterAllowed then return false end
     return true
 end
 
@@ -215,7 +223,7 @@ local function PurgeUnlabeledLists()
 end
 
 local function ParseSelected()
-    if not IsActive() then schedMap = {}; consumed = {}; return end
+    if not IsActive() and not IsCustomSelected() then schedMap = {}; consumed = {}; return end
     local lists = LoadLists()
     local selected = GetOpt(SELECTED, 'Default')
     schedMap = ParseScheduleText(lists[selected] or '')
@@ -248,6 +256,7 @@ ns.MarkConsumedNearest = MarkConsumedNearest
 
 local tracker, rows, last = nil, {}, 0
 local badge
+local injected = {}
 local function UpdateBadgeVisibility()
     if not badge then return end
     if IsActive() then badge:Show() else badge:Hide() end
@@ -313,9 +322,34 @@ local function BuildTracker()
     tracker.header:SetJustifyH('LEFT')
     local topY = -22
     for i = 1, 6 do local row = CreateFrame('Frame', nil, tracker); row:SetSize(160, 22); if i == 1 then row:SetPoint('TOPLEFT', tracker, 'TOPLEFT', 8, topY) else row:SetPoint('TOPLEFT', rows[i-1], 'BOTTOMLEFT', 0, -4) end; row.icon = row:CreateTexture(nil, 'ARTWORK'); row.icon:SetSize(20,20); row.icon:SetPoint('LEFT', row, 'LEFT', 0, 0); row.text = row:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight'); row.text:SetPoint('LEFT', row.icon, 'RIGHT', 8, 0); row.text:SetPoint('RIGHT', row, 'RIGHT', -2, 0); row.text:SetJustifyH('LEFT'); row:Hide(); rows[i] = row end
-    tracker:SetScript('OnUpdate', function() local now = GetTime(); if now - last > 0.25 then if not GetOpt(SHOW_TRACKER, true) then tracker:Hide(); last = now; return end; local entries = FlattenEntries(); local shown = 0; local elapsed = (combatStart > 0) and (now - combatStart) or 0; local w = GetWindow();
+    tracker:SetScript('OnUpdate', function() local now = GetTime(); if now - last > 0.25 then local entries = FlattenEntries(); local shown = 0; local elapsed = (combatStart > 0) and (now - combatStart) or 0; local w = GetWindow();
         tracker.header:SetText('List: ' .. DecorateDifficultyLabel(GetOpt(SELECTED, 'Default') or 'Default'))
-        for i = 1, #rows do local row = rows[i]; local e = entries[i]; if e then row.icon:SetTexture(e.tex or 136243); local rem = e.time - elapsed; if rem < 0 then rem = 0 end; row.text:SetText(TimeToMMSS(rem)); if (e.time - elapsed) <= w then row.text:SetTextColor(0.2,1,0.2) else row.text:SetTextColor(1,1,1) end; row:Show(); shown = shown + 1 else row:Hide() end end; if shown > 0 then tracker:Show() else tracker:Hide() end; last = now end end)
+        for i = 1, #rows do local row = rows[i]; local e = entries[i]; if e then row.icon:SetTexture(e.tex or 136243); local rem = e.time - elapsed; if rem < 0 then rem = 0 end; row.text:SetText(TimeToMMSS(rem)); if (e.time - elapsed) <= w then row.text:SetTextColor(0.2,1,0.2) else row.text:SetTextColor(1,1,1) end; row:Show(); shown = shown + 1
+            -- Injection: if within active window, try to cast trinket items matching this ID
+            if elapsed >= e.time and elapsed <= e.time + w then
+                if MainAddon and MainAddon.Cast and HL and Player and Player.GetTrinketData then
+                    local r1, r2 = Player:GetTrinketData()
+                    local function tryRec(rec)
+                        if not rec then return end
+                        local obj = rec.Object
+                        local itemId = rec.ID or (obj and obj:ID())
+                        local spellId = nil
+                        if rec.Spell then
+                            if type(rec.Spell) == 'table' and rec.Spell.ID then spellId = rec.Spell:ID() elseif type(rec.Spell) == 'number' then spellId = rec.Spell end
+                        end
+                        if not itemId and not spellId then return end
+                        if injected[itemId or spellId] == e.time then return end
+                        if (itemId and itemId == e.id) or (spellId and spellId == e.id) then
+                            if obj and obj.IsReady and obj:IsReady() then
+                                local ok = select(1, MainAddon.Cast(obj))
+                                if ok then injected[itemId or spellId] = e.time end
+                            end
+                        end
+                    end
+                    tryRec(r1); tryRec(r2)
+                end
+            end
+        else row:Hide() end end; if GetOpt(SHOW_TRACKER, true) and shown > 0 then tracker:Show() else tracker:Hide() end; last = now end end)
 end
 
 local editor
