@@ -5,7 +5,7 @@
 - Restart or `/reload`.
 
 ## Quick start
-- Open the editor: `/cds` (or `/cdscheduler`).
+- Open the editor: `/cds`.
 - Enter a list name, select it from the dropdown.
 - Paste entries in the left box (one per line) or directly from Lorrgs:
 
