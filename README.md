@@ -29,7 +29,6 @@ Example:
 - Pre‑seeded for Manaforge Omega (Heroic/Mythic per boss):
   - Plexus Sentinel, Loomithar, Soulbinder Naazindhri, Forgeweaver Araz,
     The Soul Hunters, Fractillus, Nexus‑King Salhadaar, Dimensius the All‑Devouring
-- Boss lists are protected; “Custom” is freeform.
 
 ## Behavior
 - A spell is allowed only when elapsed combat time ∈ `[time, time + window]`.
