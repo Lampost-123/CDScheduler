@@ -82,8 +82,11 @@ local function ParseScheduleText(txt)
         local sid = tonumber(id)
         local secs = TimeToSeconds(t)
         if sid and secs and not IGNORED_SPELLS[sid] then
-            map[sid] = map[sid] or {}
-            table.insert(map[sid], secs)
+            local spellInfo = C_Spell.GetSpellInfo(sid)
+            if spellInfo and spellInfo.name and IsSpellKnown(sid) then
+                map[sid] = map[sid] or {}
+                table.insert(map[sid], secs)
+            end
         end
     end
     for _, list in pairs(map) do table.sort(list) end
@@ -389,13 +392,11 @@ local function StartAutoCastTimer()
         local window = GetWindow()
         if scheduledSpell then
             if elapsed > scheduledSpell.windowEnd then
-                print("[CDSched] Window ended for spell " .. scheduledSpell.id)
                 scheduledSpell = nil
                 scheduledObject = nil
             else
                 local cd = GetScheduledCooldown(scheduledSpell.id)
                 if cd > 5 then
-                    print("[CDSched] Detected use of " .. scheduledSpell.id .. " via cooldown (" .. string.format("%.1f", cd) .. "s)")
                     MarkConsumedNearest(scheduledSpell.id)
                     scheduledSpell = nil
                     scheduledObject = nil
@@ -417,9 +418,7 @@ local function StartAutoCastTimer()
                                 timeIndex = i
                             }
                             scheduledObject = ResolveObjectForId(spellId)
-                            print("[CDSched] Scheduling spell " .. spellId .. " (index " .. i .. ") at " .. string.format("%.2f", elapsed) .. "s, window ends at " .. string.format("%.2f", scheduledSpell.windowEnd) .. "s, object=" .. tostring(scheduledObject ~= nil))
                             if not scheduledObject then
-                                print("[CDSched] WARNING: Failed to resolve object for spell " .. spellId)
                                 scheduledSpell = nil
                             end
                             break
@@ -660,7 +659,6 @@ if MainAddon and MainAddon.Cast then
                     matches = false
                 end
                 if matches then
-                    print("[CDSched] Actual cast detected for " .. scheduledSpell.id .. " via combat log")
                     MarkConsumedNearest(scheduledSpell.id)
                     scheduledSpell = nil
                     scheduledObject = nil
