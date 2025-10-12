@@ -1,0 +1,10 @@
+## Interface: 110002
+## Title: ZZZ-CDScheduler
+## Notes: Standalone cooldown scheduler with editor, tracker, and gating
+## Author: You
+## Version: 1.0.0
+## SavedVariables: CDSchedulerDB
+
+CDScheduler.lua
+
+
