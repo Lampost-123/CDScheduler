@@ -4,6 +4,7 @@
 ## Author: You
 ## Version: 1.0.0
 ## SavedVariables: CDSchedulerDB
+## SavedVariablesPerCharacter: CDSchedulerCharDB
 
 ZZZ-CDScheduler.lua
 
