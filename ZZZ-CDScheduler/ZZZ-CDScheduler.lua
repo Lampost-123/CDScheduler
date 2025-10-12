@@ -678,20 +678,12 @@ if MainAddon and MainAddon.Cast then
             end
             local now = GetTime()
             local isItem = currentObject.ItemID ~= nil
-            if now - lastDebugTime > 1 then
-                local ready = currentObject.IsReady and currentObject:IsReady() or false
-                print("[CDSched Hook] Injecting " .. (isItem and "item" or "spell") .. " " .. currentSpell.id .. ", ready=" .. tostring(ready))
-                lastDebugTime = now
-            end
             if not isItem then
                 if currentObject.IsReady and not currentObject:IsReady() then
                     return true, 'scheduled spell not ready, waiting'
                 end
             end
             local ok, reason = CastOriginal(currentObject, ...)
-            if not ok and now - lastDebugTime > 1 then
-                print("[CDSched Hook] Cast failed: " .. tostring(reason))
-            end
             return true, 'scheduled spell injected'
         end
         if IsActive() and spell and spell.ID and schedMap and schedMap[spell:ID()] then
